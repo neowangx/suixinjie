@@ -7,7 +7,7 @@
 
 ## 下载
 
-从 [最新发行版](https://github.com/neowangx/suixinjie/releases/latest) 选择对应平台的 ZIP。旧版本首次使用自动更新时，需要手动安装一次含更新功能的版本。
+从 [最新发行版](https://github.com/neowangx/suixinjie/releases/latest) 选择对应平台的 ZIP，包内附有使用说明和 MIT 许可证。旧版本首次使用自动更新时，需要手动安装一次含更新功能的版本。
 
 | 平台 | 文件名 |
 | --- | --- |

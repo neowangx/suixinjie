@@ -13,6 +13,7 @@ def main():
     parser.add_argument("app", type=Path, help="A macOS .app or the Windows build output directory")
     parser.add_argument("--output", type=Path, default=Path("build/releases"))
     args = parser.parse_args()
+    project = Path(__file__).resolve().parent.parent
 
     if args.platform == "macos":
         executable = "Contents/MacOS/Suixinjie"
@@ -44,6 +45,9 @@ def main():
     with ZipFile(archive, "w", ZIP_DEFLATED) as zip_file:
         for entry in entries:
             zip_file.write(args.app / entry, prefix + entry)
+        guide = project / ("windows/README.md" if args.platform == "windows" else "README.md")
+        zip_file.write(guide, "README.md")
+        zip_file.write(project / "LICENSE", "LICENSE")
     print(archive)
 
 
