@@ -5,3 +5,5 @@
 *.p12
 *.key
 .env
+/windows/**/bin/
+/windows/**/obj/

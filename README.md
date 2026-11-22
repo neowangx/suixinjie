@@ -1,8 +1,11 @@
 # 随心截 · Suixinjie
 
-随心截是一个轻量的 macOS 菜单栏截图工具。框选区域或截取整屏后，可以直接标注、复制或保存。应用使用 Swift、AppKit 和 ScreenCaptureKit，图像在本机处理。
+随心截是一个轻量的 macOS 和 Windows 截图工具。框选区域或截取整屏后，可以直接标注、复制或保存。图像在本机处理。
 
-## 构建与启动
+- macOS 14 或以上使用 Swift、AppKit 和 ScreenCaptureKit，常驻菜单栏。
+- [Windows 版](windows/README.md)使用 WinForms 和 GDI，常驻任务栏通知区域，最低兼容目标为 Windows 7 SP1 加 .NET Framework 4.8。
+
+## macOS 构建与启动
 
 需要 macOS 14 或以上，以及 Xcode 或其命令行工具。可在项目目录构建并启动应用。
 
