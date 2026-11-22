@@ -9,5 +9,6 @@
     <ProjectReference Include="../Suixinjie.csproj" />
     <Reference Include="System.Drawing" />
     <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.IO.Compression" />
   </ItemGroup>
 </Project>

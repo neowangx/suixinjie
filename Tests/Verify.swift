@@ -17,11 +17,47 @@ enum Verify {
             try verifyEditor(snapshot)
             try verifyAnnotationTools(snapshot)
             try verifyShortcuts()
+            try verifyUpdater()
             try await verifyScreenCapture()
         } catch {
             FileHandle.standardError.write(Data("FAIL: \(error)\n".utf8))
             exit(EXIT_FAILURE)
         }
+    }
+
+    private static func verifyUpdater() throws {
+        let version = try unwrap(UpdateVersion("v0.2.0"), "update version")
+        let installed = try unwrap(UpdateVersion("0.1.10"), "installed version")
+        try require(installed < version && UpdateVersion("v0.2.0-rc.1") == nil, "stable version comparison")
+        let hash = String(repeating: "a", count: 64)
+        let asset = GitHubUpdater.assetName
+        let url = "\(GitHubUpdater.releasePage.absoluteString)/download/v0.2.0/\(asset)"
+        func payload(download: String = url, digest: String = "sha256:" + hash, pre: Bool = false) throws -> Data {
+            try JSONSerialization.data(withJSONObject: [
+                "tag_name": "v0.2.0", "draft": false, "prerelease": pre, "assets": [
+                    ["name": asset, "browser_download_url": download, "digest": digest, "size": 3, "state": "uploaded"]
+                ]
+            ])
+        }
+        let update = try GitHubUpdater.offer(from: payload(), installed: installed, assetName: asset)
+        try require(update?.version == version && update?.sha256 == hash, "expected GitHub release asset")
+        let same = try GitHubUpdater.offer(from: payload(), installed: version, assetName: asset)
+        let prerelease = try GitHubUpdater.offer(from: payload(pre: true), installed: installed, assetName: asset)
+        let wrongPlatform = try GitHubUpdater.offer(from: payload(), installed: installed, assetName: "Suixinjie-windows.zip")
+        try require(same == nil && prerelease == nil && wrongPlatform == nil, "ignore installed, prerelease and other platform")
+        do {
+            _ = try GitHubUpdater.offer(from: payload(download: "https://example.com/archive.zip"), installed: installed, assetName: asset)
+            throw CheckFailed(description: "accepted another update source")
+        } catch UpdaterError.invalidPackage { }
+        let archive = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: archive) }
+        try Data("abc".utf8).write(to: archive)
+        try GitHubUpdater.verifyArchive(archive, size: 3, sha256: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+        do {
+            try GitHubUpdater.verifyArchive(archive, size: 3, sha256: hash)
+            throw CheckFailed(description: "accepted a mismatched update digest")
+        } catch UpdaterError.invalidPackage { }
+        print("PASS: update version, platform and origin checks, and SHA-256 validation")
     }
 
     private static func require(_ condition: @autoclosure () -> Bool, _ message: String) throws {

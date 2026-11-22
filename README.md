@@ -5,6 +5,18 @@
 - macOS 14 或以上使用 Swift、AppKit 和 ScreenCaptureKit，常驻菜单栏。
 - [Windows 版](windows/README.md)使用 WinForms 和 GDI，常驻任务栏通知区域，最低兼容目标为 Windows 7 SP1 加 .NET Framework 4.8。
 
+## 下载
+
+从 [最新发行版](https://github.com/neowangx/suixinjie/releases/latest) 选择对应平台的 ZIP。旧版本首次使用自动更新时，需要手动安装一次含更新功能的版本。
+
+| 平台 | 文件名 |
+| --- | --- |
+| Apple 芯片 Mac | `Suixinjie-macos-arm64.zip` |
+| Intel Mac | `Suixinjie-macos-x86_64.zip` |
+| Windows | `Suixinjie-windows.zip` |
+
+macOS 包采用临时签名，未公证。Windows 包未签名。运行资格取决于设备的安全策略。
+
 ## macOS 构建与启动
 
 需要 macOS 14 或以上，以及 Xcode 或其命令行工具。可在项目目录构建并启动应用。
@@ -32,6 +44,27 @@ open "build/随心截.app"
 - 输入文字后，先按 Return 确认文字，再按 Return 完成并复制。保存按钮可选择 PNG 文件的位置。
 - 在设置里可以重新录入两组全局快捷键，或打开登录启动。登录启动默认关闭。
 - 若远程控制软件拦截快捷键，可从被控 Mac 的菜单栏发起截图。
+
+## 自动更新
+
+随心截会在启动后及使用期间从 GitHub 检查正式版本，也可在菜单中点「检查更新…」。检测到适用的新版时会询问你，确认后才下载、校验、安装并重启。截图编辑或设置窗口关闭后再显示提示。应用所在目录不可写时，可从 GitHub 手动下载。
+
+更新来源为项目的 [GitHub Releases](https://github.com/neowangx/suixinjie/releases)。应用会校验 GitHub 提供的 SHA-256。当前安装带有发布者签名时，新版本必须与该发布者的签名身份匹配。macOS 使用临时签名的本地构建更新后，系统可能要求重新授予屏幕录制权限。
+
+### 打包发行版
+
+使用三个数字组成的正式版本，确保应用版本与 Release 标签对应，例如 `0.2.0` 与 `v0.2.0`。macOS 分别构建 arm64 和 x86_64 版本，Windows 构建 AnyCPU 版本。将各平台生成的 ZIP 上传为正式 Release 附件。
+
+```sh
+./build.sh
+python3 tools/package_update.py macos "build/随心截.app"
+SUIXINJIE_MAC_ARCH=x86_64 ./build.sh "build/macos-x86_64/随心截.app"
+python3 tools/package_update.py macos "build/macos-x86_64/随心截.app"
+dotnet build windows/Suixinjie.csproj -c Release
+python3 tools/package_update.py windows windows/bin/Release/net48
+```
+
+打包脚本按平台在 `build/releases/` 生成 `Suixinjie-macos-arm64.zip`、`Suixinjie-macos-x86_64.zip` 或 `Suixinjie-windows.zip`。签名应在打包之前完成。GitHub Releases 中缺少当前平台附件时，该设备会等到附件可用后再提示。
 
 ## 本机验证
 

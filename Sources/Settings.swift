@@ -31,6 +31,8 @@ final class Settings: NSObject, NSWindowDelegate {
     private var buttons: [CaptureMode: ShortcutButton] = [:]
     private var recordingMode: CaptureMode?
     var onChange: (() -> Void)?
+    var onClose: (() -> Void)?
+    var isVisible: Bool { window.isVisible }
 
     init(hotKeys: HotKeys) {
         self.hotKeys = hotKeys
@@ -89,7 +91,10 @@ final class Settings: NSObject, NSWindowDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    func windowWillClose(_ notification: Notification) { stopRecording() }
+    func windowWillClose(_ notification: Notification) {
+        stopRecording()
+        onClose?()
+    }
     func windowDidResignKey(_ notification: Notification) { stopRecording() }
 
     func handleRegisteredShortcut(_ mode: CaptureMode) -> Bool {

@@ -3,7 +3,11 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 output="${1:-$PWD/build/随心截.app}"
-architecture="$(uname -m)"
+architecture="${SUIXINJIE_MAC_ARCH:-$(uname -m)}"
+case "$architecture" in
+    arm64|x86_64) ;;
+    *) printf 'Unsupported macOS architecture: %s\n' "$architecture" >&2; exit 1 ;;
+esac
 mkdir -p "$(dirname "$output")"
 temporary="$(mktemp -d "$(dirname "$output")/.build.XXXXXX")"
 trap 'rm -rf "$temporary"' EXIT

@@ -18,6 +18,8 @@ internal static class Verify
         var shortcut = new Shortcut(Keys.D4, Keys.Control | Keys.Shift);
         Check(shortcut.IsValid && shortcut.NativeModifiers == 0x4006 && shortcut.ToString() == "Ctrl + Shift + 4", "hotkey encoding");
         Check(!new Shortcut(Keys.F12, Keys.Alt).IsValid, "reserved hotkey");
+        UpdateChecks.Run();
+        UpdateInstallCheck.Run();
 
         using var snapshot = new Bitmap(360, 216, PixelFormat.Format32bppRgb);
         using (var graphics = Graphics.FromImage(snapshot))

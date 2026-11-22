@@ -6,7 +6,7 @@
     <AssemblyName>Suixinjie</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>AppIcon.ico</ApplicationIcon>
-    <Version>0.1.0</Version>
+    <Version>0.2.0</Version>
     <Product>随心截</Product>
     <Prefer32Bit>false</Prefer32Bit>
     <DebugType Condition="'$(Configuration)' == 'Release'">none</DebugType>
@@ -15,6 +15,9 @@
   <ItemGroup>
     <Reference Include="System.Drawing" />
     <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Net.Http" />
+    <Reference Include="System.Runtime.Serialization" />
+    <Reference Include="System.IO.Compression" />
     <Compile Remove="Verify/**/*.cs" />
     <InternalsVisibleTo Include="Suixinjie.Verify" />
   </ItemGroup>

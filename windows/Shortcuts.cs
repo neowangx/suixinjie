@@ -91,6 +91,22 @@ namespace Suixinjie
                 }
             }
         }
+
+        public static DateTime LastUpdateCheck
+        {
+            get
+            {
+                using var key = Registry.CurrentUser.OpenSubKey(AppKey);
+                if (key?.GetValue("LastUpdateCheck") is long ticks && ticks >= 0 && ticks <= DateTime.MaxValue.Ticks)
+                    return new DateTime(ticks, DateTimeKind.Utc);
+                return DateTime.MinValue;
+            }
+            set
+            {
+                using var key = Registry.CurrentUser.CreateSubKey(AppKey);
+                key.SetValue("LastUpdateCheck", value.Ticks, RegistryValueKind.QWord);
+            }
+        }
     }
 
     internal sealed class GlobalHotkeys : NativeWindow, IDisposable

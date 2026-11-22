@@ -24,6 +24,11 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settings: Settings?
     private var editor: EditorWindow?
     private var capturing = false
+    private var checkingUpdates = false
+    private var promptingUpdate = false
+    private var installingUpdate = false
+    private var pendingUpdate: UpdateOffer?
+    private let updateCheckKey = "updates.lastSuccessfulCheck"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if let button = statusItem.button {
@@ -34,6 +39,16 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         hotKeys.onPress = { [weak self] mode in
             guard let self, self.settings?.handleRegisteredShortcut(mode) != true else { return }
             self.startCapture(mode)
+        }
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(12))
+            while let self {
+                let last = UserDefaults.standard.object(forKey: self.updateCheckKey) as? Date ?? .distantPast
+                if Date().timeIntervalSince(last) >= 24 * 60 * 60 {
+                    self.checkForUpdates(manually: false)
+                }
+                try? await Task.sleep(for: .seconds(60 * 60))
+            }
         }
     }
 
@@ -50,6 +65,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         menu.addItem(.separator())
         addItem("设置…", action: #selector(showSettings), to: menu)
+        addItem("检查更新…", action: #selector(checkForUpdatesFromMenu), to: menu)
         addItem("退出随心截", action: #selector(quit), to: menu)
         statusItem.menu = menu
     }
@@ -65,21 +81,25 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func quit() { NSApp.terminate(nil) }
 
     @objc private func showSettings() {
+        guard !installingUpdate, !promptingUpdate else { return }
         if settings == nil {
             let controller = Settings(hotKeys: hotKeys)
             controller.onChange = { [weak self] in self?.updateMenu() }
+            controller.onClose = { [weak self] in
+                Task { @MainActor in self?.presentPendingUpdate() }
+            }
             settings = controller
         }
         settings?.show()
     }
 
     private func startCapture(_ mode: CaptureMode, fromMenu: Bool = false) {
-        guard !capturing, editor == nil else { return }
+        guard !capturing, editor == nil, !installingUpdate, !promptingUpdate else { return }
         capturing = true
         let mouse = NSEvent.mouseLocation
         let screen = NSScreen.screens.first(where: { $0.frame.contains(mouse) }) ?? NSScreen.main
         Task { [self] in
-            defer { capturing = false }
+            defer { capturing = false; presentPendingUpdate() }
             // A tracked status menu lingers briefly while AppKit dismisses it.
             if fromMenu { try? await Task.sleep(for: .milliseconds(150)) }
             guard let screen, let id = ScreenSnapshot.displayID(for: screen) else {
@@ -95,7 +115,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
                     throw CaptureFailure.displayUnavailable
                 }
                 let window = EditorWindow(screen: target, snapshot: snapshot, mode: mode)
-                window.onFinish = { [weak self] in self?.editor = nil }
+                window.onFinish = { [weak self] in
+                    self?.editor = nil
+                    self?.presentPendingUpdate()
+                }
                 editor = window
                 window.present()
             } catch {
@@ -109,6 +132,76 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             }
         }
+    }
+
+    @objc private func checkForUpdatesFromMenu() { checkForUpdates(manually: true) }
+
+    private func checkForUpdates(manually: Bool) {
+        guard !checkingUpdates, !promptingUpdate, !installingUpdate,
+              let value = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
+              let installed = UpdateVersion(value) else { return }
+        checkingUpdates = true
+        Task {
+            defer { checkingUpdates = false; presentPendingUpdate() }
+            do {
+                pendingUpdate = try await GitHubUpdater.latest(installed: installed)
+                UserDefaults.standard.set(Date(), forKey: updateCheckKey)
+                if manually && pendingUpdate == nil && canPromptForUpdate {
+                    showUpdateMessage("没有可用更新", "GitHub 上暂时没有适用于这台 Mac 的更新包。")
+                }
+            } catch {
+                if manually && canPromptForUpdate { showUpdateFailure(error) }
+            }
+        }
+    }
+
+    private var canPromptForUpdate: Bool {
+        !capturing && editor == nil && settings?.isVisible != true && !promptingUpdate && !installingUpdate
+    }
+
+    private func presentPendingUpdate() {
+        guard canPromptForUpdate, let update = pendingUpdate else { return }
+        pendingUpdate = nil
+        promptingUpdate = true
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = "随心截 \(update.version) 可用"
+        alert.informativeText = "更新将从 GitHub 下载并校验。安装后随心截会重新启动。"
+        alert.addButton(withTitle: "更新并重启").keyEquivalent = ""
+        alert.addButton(withTitle: "稍后").keyEquivalent = "\u{1b}"
+        alert.addButton(withTitle: "查看发行说明")
+        let choice = alert.runModal()
+        promptingUpdate = false
+        if choice == .alertThirdButtonReturn {
+            NSWorkspace.shared.open(update.page)
+        } else if choice == .alertFirstButtonReturn {
+            installingUpdate = true
+            Task {
+                do {
+                    try await GitHubUpdater.prepareAndLaunch(update, replacing: Bundle.main.bundleURL)
+                    NSApp.terminate(nil)
+                } catch {
+                    installingUpdate = false
+                    showUpdateFailure(error)
+                }
+            }
+        }
+    }
+
+    private func showUpdateMessage(_ title: String, _ detail: String, showReleases: Bool = false) {
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = detail
+        alert.addButton(withTitle: "好")
+        if showReleases { alert.addButton(withTitle: "打开 GitHub Releases") }
+        if alert.runModal() == .alertSecondButtonReturn && showReleases {
+            NSWorkspace.shared.open(GitHubUpdater.releasePage)
+        }
+    }
+
+    private func showUpdateFailure(_ error: Error) {
+        showUpdateMessage("无法更新随心截", error.localizedDescription, showReleases: true)
     }
 
     private func showPermissionInstructions() {
