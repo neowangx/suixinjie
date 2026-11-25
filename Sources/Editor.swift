@@ -95,6 +95,45 @@ final class EditorWindow: NSWindow {
 }
 
 @MainActor
+private final class EditorToolbarButton: NSButton {
+    var restingColor = NSColor.clear {
+        didSet { refreshBackground() }
+    }
+    override var isEnabled: Bool {
+        didSet { refreshBackground() }
+    }
+
+    private var hoverArea: NSTrackingArea?
+    private var hovered = false
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverArea { removeTrackingArea(hoverArea) }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+                                  owner: self, userInfo: nil)
+        addTrackingArea(area)
+        hoverArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        hovered = true
+        refreshBackground()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        hovered = false
+        refreshBackground()
+    }
+
+    private func refreshBackground() {
+        let color = hovered && isEnabled
+            ? restingColor.blended(withFraction: 0.13, of: .white) ?? restingColor
+            : restingColor
+        layer?.backgroundColor = color.cgColor
+    }
+}
+
+@MainActor
 final class EditorCanvas: NSView, NSTextFieldDelegate {
     private enum Tool: Int, CaseIterable {
         case rectangle, ellipse, arrow, brush, mosaic, text, emoji
@@ -137,20 +176,28 @@ final class EditorCanvas: NSView, NSTextFieldDelegate {
     ]
     private static let emojis = ["👍", "✅", "❌", "⭐", "🙂", "❗"]
     private static let selectionTint = NSColor(srgbRed: 0.60, green: 0.80, blue: 1, alpha: 1)
+    private static let toolbarPadding: CGFloat = 10
+    private static let buttonSize: CGFloat = 44
 
     private let snapshot: CGImage
     private let preview: NSImage
     private let mode: CaptureMode
-    private let toolbar = NSVisualEffectView()
+    private let toolbar = NSView()
     private let toolbarStack = NSStackView()
     private let mainRow = NSStackView()
+    private let drawingRow = NSStackView()
+    private let shapes = NSStackView()
+    private let otherTools = NSStackView()
+    private let history = NSStackView()
+    private let footer = NSStackView()
     private let optionsRow = NSStackView()
+    private let outputRow = NSStackView()
     private let colorOptions = NSStackView()
     private let emojiOptions = NSStackView()
     private let sizeOptions = NSStackView()
-    private var toolButtons: [NSButton] = []
-    private var undoButton: NSButton?
-    private var redoButton: NSButton?
+    private var toolButtons: [EditorToolbarButton] = []
+    private var undoButton: EditorToolbarButton?
+    private var redoButton: EditorToolbarButton?
     private var colorIndex = 0
     private var emojiIndex = 0
     private var annotationSize: Annotation.Size = .medium
@@ -219,16 +266,34 @@ final class EditorCanvas: NSView, NSTextFieldDelegate {
     override func layout() {
         super.layout()
         guard let selection else { return }
+        let margin: CGFloat = 8
+        let padding = Self.toolbarPadding
+        let availableWidth = bounds.width - 2 * (margin + padding)
+        fitToolbarRow(drawingRow, to: availableWidth, verticalAlignment: .leading)
+        fitToolbarRow(mainRow, to: availableWidth, verticalAlignment: .leading)
+        fitToolbarRow(optionsRow, to: availableWidth, verticalAlignment: .leading)
+        fitToolbarRow(footer, to: availableWidth, verticalAlignment: .trailing)
         let size = toolbarStack.fittingSize
-        let width = size.width + 16
-        let height = size.height + 10
-        let margin: CGFloat = 7
+        let width = size.width + 2 * padding
+        let height = size.height + 2 * padding
         let x = max(margin, min(selection.maxX - width, bounds.maxX - width - margin))
         let below = selection.maxY + margin
         let above = selection.minY - height - margin
         let y = below + height <= bounds.maxY ? below : max(margin, above >= margin ? above : bounds.maxY - height - margin)
         toolbar.frame = CGRect(x: x, y: y, width: width, height: height)
-        toolbarStack.frame = toolbar.bounds.insetBy(dx: 8, dy: 5)
+        toolbarStack.frame = toolbar.bounds.insetBy(dx: padding, dy: padding)
+        window?.invalidateCursorRects(for: self)
+    }
+
+    private func fitToolbarRow(_ row: NSStackView, to width: CGFloat, verticalAlignment: NSLayoutConstraint.Attribute) {
+        let views = row.arrangedSubviews.filter { !$0.isHidden }
+        let required = views.reduce(CGFloat.zero) { $0 + $1.fittingSize.width }
+            + CGFloat(max(0, views.count - 1)) * row.spacing
+        let orientation: NSUserInterfaceLayoutOrientation = required <= width ? .horizontal : .vertical
+        if row.orientation != orientation {
+            row.orientation = orientation
+            row.alignment = orientation == .horizontal ? .centerY : verticalAlignment
+        }
     }
 
     override func resetCursorRects() {
@@ -292,8 +357,10 @@ final class EditorCanvas: NSView, NSTextFieldDelegate {
     }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
-        if event.charactersIgnoringModifiers?.lowercased() == "z", textField == nil {
-            let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let key = event.charactersIgnoringModifiers?.lowercased()
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        if key == "s", modifiers == .command, selection != nil { save(); return true }
+        if key == "z", textField == nil {
             if modifiers == .command, !annotations.isEmpty { undo(); return true }
             if modifiers == [.command, .shift], !undoneAnnotations.isEmpty { redo(); return true }
         }
@@ -368,96 +435,103 @@ final class EditorCanvas: NSView, NSTextFieldDelegate {
 
     private func setUpToolbar() {
         toolbar.appearance = NSAppearance(named: .darkAqua)
-        toolbar.material = .hudWindow
-        toolbar.blendingMode = .withinWindow
-        toolbar.state = .active
         toolbar.wantsLayer = true
-        toolbar.layer?.cornerRadius = 11
-        toolbar.layer?.masksToBounds = true
+        toolbar.layer?.backgroundColor = NSColor(srgbRed: 0.10, green: 0.13, blue: 0.17, alpha: 1).cgColor
+        toolbar.layer?.cornerRadius = 14
         toolbar.layer?.borderWidth = 1
-        toolbar.layer?.borderColor = NSColor.white.withAlphaComponent(0.14).cgColor
+        toolbar.layer?.borderColor = NSColor.white.withAlphaComponent(0.24).cgColor
+        toolbar.layer?.shadowColor = NSColor.black.cgColor
+        toolbar.layer?.shadowOpacity = 0.38
+        toolbar.layer?.shadowRadius = 12
+        toolbar.layer?.shadowOffset = CGSize(width: 0, height: -4)
         toolbarStack.orientation = .vertical
-        toolbarStack.alignment = .leading
-        toolbarStack.spacing = 4
-        for row in [mainRow, optionsRow, colorOptions, emojiOptions, sizeOptions] {
+        toolbarStack.alignment = .trailing
+        toolbarStack.spacing = 8
+        for row in [mainRow, drawingRow, shapes, otherTools, history, footer, optionsRow,
+                    outputRow, colorOptions, emojiOptions, sizeOptions] {
             row.alignment = .centerY
-            row.spacing = 2
+            row.spacing = 4
         }
+        mainRow.spacing = 12
+        footer.spacing = 12
+        optionsRow.spacing = 10
 
         for tool in Tool.allCases {
-            let button = makeButton(tool.title, symbol: tool.symbol, action: #selector(selectTool(_:)), in: mainRow)
+            let group = tool.rawValue <= Tool.arrow.rawValue ? shapes : otherTools
+            let button = makeButton(tool.title, symbol: tool.symbol, action: #selector(selectTool(_:)), in: group)
             button.setButtonType(.pushOnPushOff)
             button.tag = tool.rawValue
             toolButtons.append(button)
         }
-        addDivider(to: mainRow)
-        undoButton = makeButton("撤销", symbol: "arrow.uturn.backward", action: #selector(undo), in: mainRow)
-        redoButton = makeButton("重做", symbol: "arrow.uturn.forward", action: #selector(redo), in: mainRow)
+        drawingRow.addArrangedSubview(shapes)
+        drawingRow.addArrangedSubview(otherTools)
+        mainRow.addArrangedSubview(drawingRow)
+        undoButton = makeButton("撤销", symbol: "arrow.uturn.backward", action: #selector(undo), in: history)
+        redoButton = makeButton("重做", symbol: "arrow.uturn.forward", action: #selector(redo), in: history)
         if mode == .region {
-            _ = makeButton("重选", symbol: "crop", action: #selector(reselect), in: mainRow)
+            _ = makeButton("重选", symbol: "crop", action: #selector(reselect), in: history)
         }
-        _ = makeButton("保存…", symbol: "square.and.arrow.down", action: #selector(save), in: mainRow)
-        _ = makeButton("取消", symbol: "xmark", action: #selector(cancel), in: mainRow)
-        let copy = makeButton("完成并复制", symbol: "checkmark", action: #selector(copyImage), in: mainRow)
-        copy.contentTintColor = .white
-        copy.layer?.backgroundColor = NSColor(srgbRed: 0.19, green: 0.43, blue: 0.76, alpha: 1).cgColor
-        copy.toolTip = "完成并复制（Return）"
+        _ = makeButton("取消", symbol: "xmark", action: #selector(cancel), in: history)
+        mainRow.addArrangedSubview(history)
+        let saveButton = makeButton("保存到本地…", symbol: "square.and.arrow.down", width: 130, symbolSize: 16,
+                                    showTitle: true, action: #selector(save), in: outputRow)
+        saveButton.restingColor = NSColor(srgbRed: 0.22, green: 0.28, blue: 0.35, alpha: 1)
+        saveButton.toolTip = "保存到本地（⌘S）"
+        let copy = makeButton("复制到剪贴板", symbol: "doc.on.doc", width: 136, symbolSize: 16,
+                              showTitle: true, action: #selector(copyImage), in: outputRow)
+        copy.restingColor = NSColor(srgbRed: 0.16, green: 0.35, blue: 0.68, alpha: 1)
+        copy.toolTip = "复制到剪贴板（Return）"
         undoButton?.toolTip = "撤销（⌘Z）"
         redoButton?.toolTip = "重做（⇧⌘Z）"
 
         for (index, swatch) in Self.palette.enumerated() {
-            let button = makeButton(swatch.0, symbol: "circle.fill", width: 25,
+            let button = makeButton(swatch.0, symbol: "circle.fill", width: 36, height: 36, symbolSize: 18,
                                     action: #selector(chooseColor(_:)), in: colorOptions)
             button.tag = index
             button.contentTintColor = swatch.1
             button.setButtonType(.pushOnPushOff)
         }
         for (index, emoji) in Self.emojis.enumerated() {
-            let button = makeButton(emoji, width: 28, action: #selector(chooseEmoji(_:)), in: emojiOptions)
-            button.font = .systemFont(ofSize: 16)
+            let button = makeButton(emoji, width: 36, height: 36, action: #selector(chooseEmoji(_:)), in: emojiOptions)
+            button.font = .systemFont(ofSize: 20)
             button.tag = index
             button.setButtonType(.pushOnPushOff)
         }
         for size in Annotation.Size.allCases {
-            let button = makeButton(["小", "中", "大"][size.rawValue], symbol: "circle.fill", width: 26,
-                                    symbolSize: [5, 9, 13][size.rawValue], action: #selector(chooseSize(_:)), in: sizeOptions)
+            let button = makeButton(["小", "中", "大"][size.rawValue], symbol: "circle.fill", width: 36, height: 36,
+                                    symbolSize: [7, 11, 16][size.rawValue], action: #selector(chooseSize(_:)), in: sizeOptions)
             button.tag = size.rawValue
             button.setButtonType(.pushOnPushOff)
         }
         optionsRow.addArrangedSubview(colorOptions)
         optionsRow.addArrangedSubview(emojiOptions)
         optionsRow.addArrangedSubview(sizeOptions)
-        optionsRow.spacing = 9
+        footer.addArrangedSubview(optionsRow)
+        footer.addArrangedSubview(outputRow)
         toolbarStack.addArrangedSubview(mainRow)
-        toolbarStack.addArrangedSubview(optionsRow)
+        toolbarStack.addArrangedSubview(footer)
         toolbar.addSubview(toolbarStack)
         addSubview(toolbar)
     }
 
-    private func addDivider(to row: NSStackView) {
-        let divider = NSView()
-        divider.wantsLayer = true
-        divider.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.21).cgColor
-        row.addArrangedSubview(divider)
-        divider.widthAnchor.constraint(equalToConstant: 1).isActive = true
-        divider.heightAnchor.constraint(equalToConstant: 17).isActive = true
-    }
-
-    private func makeButton(_ title: String, symbol: String? = nil, width: CGFloat = 30, symbolSize: CGFloat = 14,
-                            action: Selector, in row: NSStackView) -> NSButton {
-        let button = NSButton(title: title, target: self, action: action)
+    private func makeButton(_ title: String, symbol: String? = nil, width: CGFloat? = nil,
+                            height: CGFloat? = nil, symbolSize: CGFloat = 20, showTitle: Bool = false, action: Selector,
+                            in row: NSStackView) -> EditorToolbarButton {
+        let button = EditorToolbarButton(title: title, target: self, action: action)
         if let symbol, let image = NSImage(systemSymbolName: symbol, accessibilityDescription: title) {
             button.image = image.withSymbolConfiguration(.init(pointSize: symbolSize, weight: .medium))
-            button.imagePosition = .imageOnly
+            button.imagePosition = showTitle ? .imageLeft : .imageOnly
         }
+        button.font = .systemFont(ofSize: 14, weight: showTitle ? .semibold : .regular)
+        button.contentTintColor = .white
         button.isBordered = false
         button.setAccessibilityLabel(title)
         button.toolTip = title
         button.wantsLayer = true
-        button.layer?.cornerRadius = 6
+        button.layer?.cornerRadius = 8
         row.addArrangedSubview(button)
-        button.widthAnchor.constraint(equalToConstant: width).isActive = true
-        button.heightAnchor.constraint(equalToConstant: 27).isActive = true
+        button.widthAnchor.constraint(equalToConstant: width ?? Self.buttonSize).isActive = true
+        button.heightAnchor.constraint(equalToConstant: height ?? Self.buttonSize).isActive = true
         return button
     }
 
@@ -468,26 +542,26 @@ final class EditorCanvas: NSView, NSTextFieldDelegate {
         colorOptions.isHidden = !tool.usesColor
         emojiOptions.isHidden = tool != .emoji
         for button in toolButtons { highlight(button, selected: button.tag == tool.rawValue) }
-        for case let button as NSButton in colorOptions.arrangedSubviews {
+        for case let button as EditorToolbarButton in colorOptions.arrangedSubviews {
             highlight(button, selected: button.tag == colorIndex, tint: Self.palette[button.tag].1)
         }
-        for case let button as NSButton in emojiOptions.arrangedSubviews {
+        for case let button as EditorToolbarButton in emojiOptions.arrangedSubviews {
             highlight(button, selected: button.tag == emojiIndex)
         }
-        for case let button as NSButton in sizeOptions.arrangedSubviews {
+        for case let button as EditorToolbarButton in sizeOptions.arrangedSubviews {
             highlight(button, selected: button.tag == annotationSize.rawValue)
         }
         needsLayout = true
         window?.invalidateCursorRects(for: self)
     }
 
-    private func highlight(_ button: NSButton, selected: Bool, tint: NSColor? = nil) {
+    private func highlight(_ button: EditorToolbarButton, selected: Bool, tint: NSColor? = nil) {
         button.state = selected ? .on : .off
         button.contentTintColor = tint ?? (selected ? Self.selectionTint : .white)
         button.layer?.borderWidth = selected ? 1 : 0
         button.layer?.borderColor = Self.selectionTint.withAlphaComponent(0.62).cgColor
         let swatchBackground = tint == .black ? NSColor.white.withAlphaComponent(0.24) : .clear
-        button.layer?.backgroundColor = (selected ? Self.selectionTint.withAlphaComponent(0.28) : swatchBackground).cgColor
+        button.restingColor = selected ? Self.selectionTint.withAlphaComponent(0.28) : swatchBackground
     }
 
     @objc private func selectTool(_ button: NSButton) {

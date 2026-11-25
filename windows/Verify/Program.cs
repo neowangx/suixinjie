@@ -20,6 +20,7 @@ internal static class Verify
         Check(!new Shortcut(Keys.F12, Keys.Alt).IsValid, "reserved hotkey");
         UpdateChecks.Run();
         UpdateInstallCheck.Run();
+        VerifyToolbar();
 
         using var snapshot = new Bitmap(360, 216, PixelFormat.Format32bppRgb);
         using (var graphics = Graphics.FromImage(snapshot))
@@ -65,6 +66,42 @@ internal static class Verify
         using var full = CaptureImage.Render(snapshot, new Rectangle(Point.Empty, snapshot.Size), Array.Empty<Mark>(), null);
         Check(full.Size == snapshot.Size, "full-screen image dimensions");
         Console.WriteLine("PASS: hotkey encoding, crop, all annotation tools, mosaic clipping, and PNG save");
+    }
+
+    private static void VerifyToolbar()
+    {
+        Application.EnableVisualStyles();
+        Application.SetCompatibleTextRenderingDefault(false);
+        using var image = new Bitmap(320, 320);
+        using var editor = new Editor(image, new Rectangle(10, 10, 320, 320), CaptureMode.FullScreen);
+        editor.Show();
+        editor.PerformLayout();
+        foreach (string text in new[] { "保存到本地…", "复制到剪贴板", "□", "×" })
+        {
+            var button = FindButton(editor, text);
+            Check(button != null && button.Visible && button.Width >= 44 && button.Height >= 44,
+                  "large visible Windows toolbar button " + text);
+            var origin = button.PointToScreen(Point.Empty);
+            for (Control parent = button.Parent; parent != null; parent = parent.Parent)
+            {
+                var area = new Rectangle(parent.PointToClient(origin), button.Size);
+                Check(parent.ClientRectangle.Contains(area), "Windows toolbar wraps without clipping " + text +
+                      " at " + area + " in " + parent.ClientRectangle);
+            }
+        }
+        editor.Close();
+        Console.WriteLine("PASS: Windows toolbar labels and 44-pixel actions fit a narrow window");
+    }
+
+    private static Button FindButton(Control parent, string text)
+    {
+        foreach (Control child in parent.Controls)
+        {
+            if (child is Button button && button.Text == text) return button;
+            var match = FindButton(child, text);
+            if (match != null) return match;
+        }
+        return null;
     }
 
     private static bool Contains(Bitmap image, Rectangle selection, int x, int y, int width, int height, Func<Color, bool> match)

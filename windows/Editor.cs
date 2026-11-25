@@ -17,22 +17,26 @@ namespace Suixinjie
         };
         private static readonly string[] ColorNames = { "红色", "橙色", "黄色", "绿色", "蓝色", "白色", "黑色" };
         private static readonly string[] Stamps = { "✓", "✕", "★", "☺", "♥", "!" };
-        private static readonly Color Surface = Color.FromArgb(32, 38, 49);
-        private static readonly Color Active = Color.FromArgb(59, 93, 139);
+        private static readonly Color Surface = Color.FromArgb(26, 33, 43);
+        private static readonly Color Secondary = Color.FromArgb(56, 71, 89);
+        private static readonly Color Active = Color.FromArgb(56, 85, 126);
+        private static readonly Color Primary = Color.FromArgb(41, 89, 173);
         private static readonly Color Accent = Color.FromArgb(54, 117, 204);
+        private const int ButtonSize = 44;
 
         private readonly Bitmap snapshot;
         private readonly CaptureMode mode;
         private readonly List<Mark> marks = new List<Mark>();
         private readonly Stack<Mark> undone = new Stack<Mark>();
         private readonly List<Point> stroke = new List<Point>();
-        private readonly FlowLayoutPanel toolbar, toolsRow, optionsRow, colorRow, stampRow, sizeRow;
+        private readonly FlowLayoutPanel toolbar, toolsRow, drawingRow, footerRow, optionsRow, colorRow, stampRow, sizeRow;
         private readonly ToolTip tips = new ToolTip { InitialDelay = 300 };
         private readonly Button[] toolButtons = new Button[ToolNames.Length];
         private readonly Button[] colorButtons = new Button[Colors.Length];
         private readonly Button[] stampButtons = new Button[Stamps.Length];
         private readonly Button[] sizeButtons = new Button[3];
         private readonly Button undoButton, redoButton;
+        private readonly Font iconFont, labelFont;
         private readonly float scale;
         private Rectangle selection;
         private Point? origin;
@@ -59,20 +63,33 @@ namespace Suixinjie
             DoubleBuffered = true;
             SetStyle(ControlStyles.Opaque, true);
             using (var graphics = CreateGraphics()) scale = Math.Max(1, graphics.DpiX / 96);
+            iconFont = new Font("Segoe UI Symbol", Pixels(20), GraphicsUnit.Pixel);
+            labelFont = new Font(SystemFonts.MessageBoxFont.FontFamily, Pixels(15), FontStyle.Bold, GraphicsUnit.Pixel);
 
             toolbar = Row(FlowDirection.TopDown);
-            toolbar.Padding = new Padding(Pixels(5));
+            toolbar.Padding = new Padding(Pixels(10));
             toolbar.BackColor = Surface;
+            toolbar.BorderStyle = BorderStyle.FixedSingle;
             toolsRow = Row();
+            drawingRow = Row();
+            var shapes = Row();
+            var otherTools = Row();
+            var history = Row();
+            footerRow = Row();
             optionsRow = Row();
             colorRow = Row();
             stampRow = Row();
             sizeRow = Row();
+            var output = Row();
+            toolsRow.Margin = new Padding(0, 0, 0, Pixels(5));
+            history.Margin = new Padding(Pixels(8), 0, 0, 0);
+            output.Margin = new Padding(Pixels(8), 0, 0, 0);
 
             for (int i = 0; i < toolButtons.Length; i++)
             {
                 var selected = (Tool)i;
-                toolButtons[i] = AddButton(toolsRow, ToolIcons[i], ToolNames[i], () =>
+                var group = i <= (int)Tool.Arrow ? shapes : otherTools;
+                toolButtons[i] = AddButton(group, ToolIcons[i], ToolNames[i], () =>
                 {
                     FinishText();
                     tool = selected;
@@ -80,18 +97,16 @@ namespace Suixinjie
                     Cursor = tool == Tool.Text ? Cursors.IBeam : Cursors.Cross;
                 });
             }
-            toolsRow.Controls.Add(new Panel
-            {
-                Size = new Size(1, Pixels(19)), Margin = new Padding(Pixels(3), Pixels(6), Pixels(3), 0),
-                BackColor = Color.FromArgb(91, 100, 113)
-            });
-            undoButton = AddButton(toolsRow, "↶", "撤销（Ctrl+Z）", Undo);
-            redoButton = AddButton(toolsRow, "↷", "重做（Ctrl+Y）", Redo);
-            if (mode == CaptureMode.Region) AddButton(toolsRow, "⌗", "重选", ResetSelection);
-            AddButton(toolsRow, "↓", "保存 PNG", () => Complete(true));
-            AddButton(toolsRow, "×", "取消（Esc）", Close);
-            var copy = AddButton(toolsRow, "✓", "完成并复制（Enter）", () => Complete(false));
-            copy.BackColor = Accent;
+            drawingRow.Controls.AddRange(new Control[] { shapes, otherTools });
+            toolsRow.Controls.AddRange(new Control[] { drawingRow, history });
+            undoButton = AddButton(history, "↶", "撤销（Ctrl+Z）", Undo);
+            redoButton = AddButton(history, "↷", "重做（Ctrl+Y）", Redo);
+            if (mode == CaptureMode.Region) AddButton(history, "⌗", "重选", ResetSelection);
+            AddButton(history, "×", "取消（Esc）", Close);
+            var save = AddButton(output, "保存到本地…", "保存到本地（Ctrl+S）", () => Complete(true), 130, label: true);
+            save.BackColor = Secondary;
+            var copy = AddButton(output, "复制到剪贴板", "复制到剪贴板（Enter）", () => Complete(false), 136, label: true);
+            copy.BackColor = Primary;
 
             for (int i = 0; i < colorButtons.Length; i++)
             {
@@ -101,7 +116,7 @@ namespace Suixinjie
                     FinishText();
                     colorIndex = index;
                     UpdateToolbar();
-                }, 26);
+                }, 36, height: 36);
                 colorButtons[i].ForeColor = Colors[i];
             }
             for (int i = 0; i < stampButtons.Length; i++)
@@ -111,7 +126,7 @@ namespace Suixinjie
                 {
                     stampIndex = index;
                     UpdateToolbar();
-                }, 26);
+                }, 36, height: 36);
             }
             for (int i = 0; i < sizeButtons.Length; i++)
             {
@@ -122,10 +137,11 @@ namespace Suixinjie
                     FinishText();
                     sizeIndex = index;
                     UpdateToolbar();
-                }, 27);
+                }, 36, label: true, height: 36);
             }
             optionsRow.Controls.AddRange(new Control[] { colorRow, stampRow, sizeRow });
-            toolbar.Controls.AddRange(new Control[] { toolsRow, optionsRow });
+            footerRow.Controls.AddRange(new Control[] { optionsRow, output });
+            toolbar.Controls.AddRange(new Control[] { toolsRow, footerRow });
             Controls.Add(toolbar);
             Cursor = Cursors.Cross;
             UpdateToolbar();
@@ -140,13 +156,16 @@ namespace Suixinjie
                 WrapContents = false, Margin = Padding.Empty
             };
 
-        private Button AddButton(Control parent, string text, string name, Action action, int width = 30)
+        private Button AddButton(Control parent, string text, string name, Action action, int width = ButtonSize,
+                                 bool label = false, int height = ButtonSize)
         {
             var button = new Button
             {
                 Text = text, AccessibleName = name, TabStop = false, UseVisualStyleBackColor = false,
                 FlatStyle = FlatStyle.Flat, ForeColor = Color.WhiteSmoke, BackColor = Surface,
-                Size = new Size(Pixels(width), Pixels(29)), Margin = new Padding(Pixels(1)), Cursor = Cursors.Default
+                Font = label ? labelFont : iconFont, UseCompatibleTextRendering = false,
+                Size = new Size(Pixels(width), Pixels(height)), Margin = new Padding(Pixels(2)),
+                Cursor = Cursors.Default
             };
             button.FlatAppearance.BorderSize = 0;
             button.FlatAppearance.MouseOverBackColor = Active;
@@ -163,7 +182,7 @@ namespace Suixinjie
             stampRow.Visible = tool == Tool.Stamp;
             for (int i = 0; i < toolButtons.Length; i++) toolButtons[i].BackColor = (int)tool == i ? Active : Surface;
             for (int i = 0; i < colorButtons.Length; i++)
-                colorButtons[i].BackColor = colorIndex == i ? Active : i == Colors.Length - 1 ? Color.Gray : Surface;
+                colorButtons[i].BackColor = colorIndex == i ? Active : i == Colors.Length - 1 ? Secondary : Surface;
             for (int i = 0; i < stampButtons.Length; i++) stampButtons[i].BackColor = stampIndex == i ? Active : Surface;
             for (int i = 0; i < sizeButtons.Length; i++) sizeButtons[i].BackColor = sizeIndex == i ? Active : Surface;
             undoButton.Enabled = marks.Count > 0;
@@ -171,8 +190,16 @@ namespace Suixinjie
             toolbar.Visible = visible;
             if (visible)
             {
+                int margin = Pixels(8);
+                int available = Math.Max(1, ClientSize.Width - toolbar.Padding.Horizontal - 2 * margin - 2);
+                foreach (var row in new[] { drawingRow, optionsRow, toolsRow, footerRow })
+                {
+                    row.MaximumSize = new Size(available, 0);
+                    row.WrapContents = true;
+                    row.PerformLayout();
+                }
                 toolbar.PerformLayout();
-                int margin = Pixels(7), width = toolbar.Width, height = toolbar.Height;
+                int width = toolbar.Width, height = toolbar.Height;
                 int x = Math.Max(0, Math.Min(selection.Right - width, ClientSize.Width - width - margin));
                 int below = selection.Bottom + margin, above = selection.Top - height - margin;
                 int y = below + height <= ClientSize.Height ? below : above >= 0 ? above : Math.Max(0, ClientSize.Height - height - margin);
@@ -438,7 +465,12 @@ namespace Suixinjie
                 tips.Dispose();
             }
             base.Dispose(disposing);
-            if (disposing) editingFont?.Dispose();
+            if (disposing)
+            {
+                editingFont?.Dispose();
+                iconFont?.Dispose();
+                labelFont?.Dispose();
+            }
         }
     }
 }

@@ -16,6 +16,7 @@ enum Verify {
             let snapshot = try fixture()
             try verifyEditor(snapshot)
             try verifyAnnotationTools(snapshot)
+            try verifyCompactToolbar(snapshot)
             try verifyShortcuts()
             try verifyUpdater()
             try await verifyScreenCapture()
@@ -90,13 +91,13 @@ enum Verify {
         var output: CGImage?
         canvas.onOutput = { image, _ in output = image }
         func bitmap() throws -> NSBitmapImageRep {
-            try button("完成并复制", in: canvas).performClick(nil)
+            try button("复制到剪贴板", in: canvas).performClick(nil)
             return NSBitmapImageRep(cgImage: try unwrap(output, "annotation tools output"))
         }
         func redComponent(_ image: NSBitmapImageRep, _ x: Int, _ y: Int) -> CGFloat {
             image.colorAt(x: x, y: y)?.usingColorSpace(.sRGB)?.redComponent ?? 0
         }
-        let tools = ["矩形", "椭圆", "箭头", "画笔", "马赛克", "文字", "表情", "撤销", "重做", "保存…", "取消", "完成并复制"]
+        let tools = ["矩形", "椭圆", "箭头", "画笔", "马赛克", "文字", "表情", "撤销", "重做", "保存到本地…", "取消", "复制到剪贴板"]
         for title in tools {
             let item = try button(title, in: canvas)
             try require(item.image != nil && canvas.bounds.contains(canvas.convert(item.bounds, from: item)),
@@ -144,6 +145,27 @@ enum Verify {
         print("PASS: native toolbar icons, arrow, colored freehand stroke, emoji, mosaic, undo and redo")
     }
 
+    private static func verifyCompactToolbar(_ snapshot: CGImage) throws {
+        let narrow = CGSize(width: 320, height: 320)
+        let window = NSWindow(contentRect: CGRect(origin: .zero, size: narrow), styleMask: .borderless,
+                              backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        let canvas = EditorCanvas(snapshot: snapshot, size: narrow, mode: .fullScreen)
+        window.contentView = canvas
+        canvas.layoutSubtreeIfNeeded()
+        let save = try button("保存到本地…", in: canvas)
+        let copy = try button("复制到剪贴板", in: canvas)
+        try require(save.imagePosition == .imageLeft && copy.imagePosition == .imageLeft, "visible output labels")
+        for item in [save, copy, try button("矩形", in: canvas), try button("取消", in: canvas)] {
+            let bounds = canvas.convert(item.bounds, from: item)
+            try require(bounds.width >= 44 && bounds.height >= 44 && canvas.bounds.contains(bounds),
+                        "large reachable target for \(item.title) on a narrow display, actual \(bounds)")
+            let center = canvas.convert(CGPoint(x: bounds.midX, y: bounds.midY), to: canvas.superview)
+            try require(canvas.hitTest(center) === item, "button receives clicks for \(item.title)")
+        }
+        print("PASS: full-size toolbar actions wrap and remain visible at 320 points")
+    }
+
     private static func verifyEditor(_ snapshot: CGImage) throws {
         let window = NSWindow(contentRect: CGRect(origin: .zero, size: size), styleMask: .borderless,
                               backing: .buffered, defer: false)
@@ -159,8 +181,8 @@ enum Verify {
         try require(lastOutput == nil, "Return before selecting an area")
         try drag(canvas, from: CGPoint(x: 260, y: 220), to: CGPoint(x: 25, y: 20))
         canvas.layoutSubtreeIfNeeded()
-        let finishButton = try button("完成并复制", in: canvas)
-        try require(finishButton.frame.width > 0, "visible editing toolbar")
+        let finishButton = try button("复制到剪贴板", in: canvas)
+        try require(finishButton.frame.width >= 44, "visible editing toolbar")
         try drag(canvas, from: CGPoint(x: 38, y: 32), to: CGPoint(x: 112, y: 72))
         try button("椭圆", in: canvas).performClick(nil)
         try drag(canvas, from: CGPoint(x: 128, y: 42), to: CGPoint(x: 196, y: 86))
@@ -169,7 +191,7 @@ enum Verify {
         canvas.mouseDown(with: click)
         let field = try unwrap(canvas.subviews.compactMap { $0 as? NSTextField }.first, "inline text field")
         if let editor = field.currentEditor() { editor.string = "截图 Text" } else { field.stringValue = "截图 Text" }
-        try button("保存…", in: canvas).performClick(nil)
+        try button("保存到本地…", in: canvas).performClick(nil)
         let (image, save) = try unwrap(lastOutput, "save action image")
         try require(save && image.width == 470 && image.height == 400, "2× region selection and save action")
 
@@ -182,6 +204,10 @@ enum Verify {
         let bottom = bitmap.colorAt(x: 6, y: 390)?.redComponent ?? 0
         try require(bottom > 0.45 && bottom < 0.55, "crop orientation near bottom")
 
+        let saveKey = try keyboard(kVK_ANSI_S, "s", modifiers: .command)
+        lastOutput = nil
+        try require(canvas.performKeyEquivalent(with: saveKey), "Command-S saves")
+        try require(lastOutput?.1 == true, "Command-S uses file output")
         lastOutput = nil
         canvas.keyDown(with: try keyboard(kVK_Return, "\r"))
         let (copyImage, copyWasSave) = try unwrap(lastOutput, "Return action image")
