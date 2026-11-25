@@ -183,7 +183,6 @@ final class EditorCanvas: NSView, NSTextFieldDelegate {
     private let preview: NSImage
     private let mode: CaptureMode
     private let toolbar = NSView()
-    private let toolbarStack = NSStackView()
     private let mainRow = NSStackView()
     private let drawingRow = NSStackView()
     private let shapes = NSStackView()
@@ -268,20 +267,25 @@ final class EditorCanvas: NSView, NSTextFieldDelegate {
         guard let selection else { return }
         let margin: CGFloat = 8
         let padding = Self.toolbarPadding
+        let rowSpacing: CGFloat = 8
         let availableWidth = bounds.width - 2 * (margin + padding)
         fitToolbarRow(drawingRow, to: availableWidth, verticalAlignment: .leading)
         fitToolbarRow(mainRow, to: availableWidth, verticalAlignment: .leading)
         fitToolbarRow(optionsRow, to: availableWidth, verticalAlignment: .leading)
         fitToolbarRow(footer, to: availableWidth, verticalAlignment: .trailing)
-        let size = toolbarStack.fittingSize
-        let width = size.width + 2 * padding
-        let height = size.height + 2 * padding
+        let mainSize = mainRow.fittingSize
+        let footerSize = footer.fittingSize
+        let width = max(mainSize.width, footerSize.width) + 2 * padding
+        let height = mainSize.height + rowSpacing + footerSize.height + 2 * padding
         let x = max(margin, min(selection.maxX - width, bounds.maxX - width - margin))
         let below = selection.maxY + margin
         let above = selection.minY - height - margin
         let y = below + height <= bounds.maxY ? below : max(margin, above >= margin ? above : bounds.maxY - height - margin)
         toolbar.frame = CGRect(x: x, y: y, width: width, height: height)
-        toolbarStack.frame = toolbar.bounds.insetBy(dx: padding, dy: padding)
+        mainRow.frame = CGRect(x: padding, y: padding + footerSize.height + rowSpacing,
+                               width: mainSize.width, height: mainSize.height)
+        footer.frame = CGRect(x: width - padding - footerSize.width, y: padding,
+                              width: footerSize.width, height: footerSize.height)
         window?.invalidateCursorRects(for: self)
     }
 
@@ -444,9 +448,6 @@ final class EditorCanvas: NSView, NSTextFieldDelegate {
         toolbar.layer?.shadowOpacity = 0.38
         toolbar.layer?.shadowRadius = 12
         toolbar.layer?.shadowOffset = CGSize(width: 0, height: -4)
-        toolbarStack.orientation = .vertical
-        toolbarStack.alignment = .trailing
-        toolbarStack.spacing = 8
         for row in [mainRow, drawingRow, shapes, otherTools, history, footer, optionsRow,
                     outputRow, colorOptions, emojiOptions, sizeOptions] {
             row.alignment = .centerY
@@ -508,9 +509,8 @@ final class EditorCanvas: NSView, NSTextFieldDelegate {
         optionsRow.addArrangedSubview(sizeOptions)
         footer.addArrangedSubview(optionsRow)
         footer.addArrangedSubview(outputRow)
-        toolbarStack.addArrangedSubview(mainRow)
-        toolbarStack.addArrangedSubview(footer)
-        toolbar.addSubview(toolbarStack)
+        toolbar.addSubview(mainRow)
+        toolbar.addSubview(footer)
         addSubview(toolbar)
     }
 

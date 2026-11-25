@@ -6,7 +6,7 @@
     <AssemblyName>Suixinjie</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>AppIcon.ico</ApplicationIcon>
-    <Version>0.2.1</Version>
+    <Version>0.2.2</Version>
     <Product>随心截</Product>
     <Prefer32Bit>false</Prefer32Bit>
     <DebugType Condition="'$(Configuration)' == 'Release'">none</DebugType>

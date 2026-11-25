@@ -16,6 +16,7 @@ enum Verify {
             let snapshot = try fixture()
             try verifyEditor(snapshot)
             try verifyAnnotationTools(snapshot)
+            try verifyToolbarAlignment(snapshot)
             try verifyCompactToolbar(snapshot)
             try verifyShortcuts()
             try verifyUpdater()
@@ -143,6 +144,27 @@ enum Verify {
         try require(abs(redComponent(redone, 650, 188) - redComponent(redone, 654, 188)) < 0.02,
                     "redo restores the mosaic")
         print("PASS: native toolbar icons, arrow, colored freehand stroke, emoji, mosaic, undo and redo")
+    }
+
+    private static func verifyToolbarAlignment(_ snapshot: CGImage) throws {
+        let wide = CGSize(width: 880, height: 500)
+        let window = NSWindow(contentRect: CGRect(origin: .zero, size: wide), styleMask: .borderless,
+                              backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        let canvas = EditorCanvas(snapshot: snapshot, size: wide, mode: .fullScreen)
+        window.contentView = canvas
+        let toolbar = try unwrap(canvas.subviews.first, "toolbar")
+        let rectangle = try button("矩形", in: toolbar)
+        let copy = try button("复制到剪贴板", in: toolbar)
+        for title in ["矩形", "马赛克"] {
+            try button(title, in: toolbar).performClick(nil)
+            canvas.layoutSubtreeIfNeeded()
+            let first = toolbar.convert(rectangle.bounds, from: rectangle)
+            let last = toolbar.convert(copy.bounds, from: copy)
+            try require(abs(first.minX - toolbar.bounds.minX - 10) < 0.5, "first tool aligns left for \(title)")
+            try require(abs(toolbar.bounds.maxX - last.maxX - 10) < 0.5, "copy aligns right for \(title)")
+        }
+        print("PASS: first tool aligns left and copy aligns right as tool options change")
     }
 
     private static func verifyCompactToolbar(_ snapshot: CGImage) throws {
